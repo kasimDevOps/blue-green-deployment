@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp-blue
+  namespace: blue
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: myapp
+      version: blue
+  template:
+    metadata:
+      labels:
+        app: myapp
+        version: blue
+    spec:
+      containers:
+      - name: frontend
+        image: myrepo/frontend:latest
+        ports:
+        - containerPort: 3000
+      - name: backend
+        image: myrepo/backend:latest
+        ports:
+        - containerPort: 5000
