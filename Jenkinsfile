@@ -2,13 +2,13 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds') // DockerHub creds in Jenkins
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds') // DockerHub creds
         GITHUB_CREDENTIALS = credentials('github-creds')       // GitHub token
+        KUBECONFIG_CRED = 'kubeconfig'                          // Jenkins secret file for kubeconfig
         APP_NAME = "myapp"
         BLUE_ENV = "blue"
         GREEN_ENV = "green"
-        DOCKER_USER = "kasimrock64"                             // Your DockerHub username
-        DOCKER_REPO = "${DOCKER_USER}"                          // DockerHub repo prefix
+        DOCKER_REPO = "kasimrock64"                             // DockerHub repo name
         GIT_REPO = "https://github.com/kasimDevOps/blue-green-deployment.git"
         BRANCH = "main"
     }
@@ -41,7 +41,7 @@ pipeline {
                 timeout(time: 5, unit: 'MINUTES') {
                     sh """
                         echo "Logging into DockerHub..."
-                        echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKER_USER --password-stdin
+                        echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin
                         
                         echo "Pushing Docker images..."
                         docker push ${DOCKER_REPO}/frontend:latest
@@ -54,11 +54,14 @@ pipeline {
         stage('Deploy to Green') {
             steps {
                 timeout(time: 5, unit: 'MINUTES') {
-                    sh """
-                        echo "Deploying to Green environment..."
-                        kubectl apply -f k8s/deployment-green.yaml
-                        kubectl apply -f k8s/service-green.yaml
-                    """
+                    withCredentials([file(credentialsId: "${KUBECONFIG_CRED}", variable: 'KUBECONFIG_FILE')]) {
+                        sh """
+                            export KUBECONFIG=$KUBECONFIG_FILE
+                            echo "Deploying to Green environment..."
+                            kubectl apply -f k8s/deployment-green.yaml
+                            kubectl apply -f k8s/service-green.yaml
+                        """
+                    }
                 }
             }
         }
@@ -77,8 +80,13 @@ pipeline {
         stage('Switch Traffic to Green') {
             steps {
                 timeout(time: 3, unit: 'MINUTES') {
-                    echo "Switching traffic from Blue to Green..."
-                    sh 'kubectl apply -f k8s/service-switch-green.yaml'
+                    withCredentials([file(credentialsId: "${KUBECONFIG_CRED}", variable: 'KUBECONFIG_FILE')]) {
+                        sh """
+                            export KUBECONFIG=$KUBECONFIG_FILE
+                            echo "Switching traffic from Blue to Green..."
+                            kubectl apply -f k8s/service-switch-green.yaml
+                        """
+                    }
                 }
             }
         }
@@ -86,8 +94,13 @@ pipeline {
         stage('Cleanup Blue Environment') {
             steps {
                 timeout(time: 3, unit: 'MINUTES') {
-                    echo "Cleaning up Blue environment..."
-                    sh "kubectl scale deployment ${APP_NAME}-${BLUE_ENV} --replicas=0"
+                    withCredentials([file(credentialsId: "${KUBECONFIG_CRED}", variable: 'KUBECONFIG_FILE')]) {
+                        sh """
+                            export KUBECONFIG=$KUBECONFIG_FILE
+                            echo "Cleaning up Blue environment..."
+                            kubectl scale deployment ${APP_NAME}-${BLUE_ENV} --replicas=0
+                        """
+                    }
                 }
             }
         }
@@ -96,10 +109,13 @@ pipeline {
     post {
         failure {
             echo "Deployment failed ❌ Rolling back to Blue environment..."
-            sh '''
-                echo "Rolling back traffic to Blue..."
-                kubectl apply -f k8s/service-switch-blue.yaml || echo "Rollback failed"
-            '''
+            withCredentials([file(credentialsId: "${KUBECONFIG_CRED}", variable: 'KUBECONFIG_FILE')]) {
+                sh '''
+                    export KUBECONFIG=$KUBECONFIG_FILE
+                    echo "Rolling back traffic to Blue..."
+                    kubectl apply -f k8s/service-switch-blue.yaml || echo "Rollback failed"
+                '''
+            }
         }
         success {
             echo "✅ Blue-Green deployment completed successfully! Now serving traffic from Green."
