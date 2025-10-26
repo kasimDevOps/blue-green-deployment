@@ -1,8 +1,13 @@
-FROM node:18
+# Stage 1: Build the React app
+FROM node:18 AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm install
+RUN npm install --only=production
 COPY . .
 RUN npm run build
-EXPOSE 3000
-CMD ["npx", "serve", "-s", "build", "-l", "3000"]
+
+# Stage 2: Use a lightweight image to serve the app
+FROM nginx:alpine
+COPY --from=build /app/build /usr/share/nginx/html
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
