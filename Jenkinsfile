@@ -2,14 +2,15 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds') // DockerHub creds
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds') // DockerHub creds in Jenkins
         GITHUB_CREDENTIALS = credentials('github-creds')       // GitHub token
         APP_NAME = "myapp"
         BLUE_ENV = "blue"
         GREEN_ENV = "green"
-        DOCKER_REPO = "myrepo"                                 // DockerHub repo name
+        DOCKER_USER = "kasimrock64"                             // Your DockerHub username
+        DOCKER_REPO = "${DOCKER_USER}"                          // DockerHub repo prefix
         GIT_REPO = "https://github.com/kasimDevOps/blue-green-deployment.git"
-        BRANCH = "main"                                        // Git branch
+        BRANCH = "main"
     }
 
     stages {
@@ -40,7 +41,7 @@ pipeline {
                 timeout(time: 5, unit: 'MINUTES') {
                     sh """
                         echo "Logging into DockerHub..."
-                        echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin
+                        echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKER_USER --password-stdin
                         
                         echo "Pushing Docker images..."
                         docker push ${DOCKER_REPO}/frontend:latest
