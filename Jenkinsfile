@@ -7,7 +7,7 @@ pipeline {
         APP_NAME = "myapp"
         BLUE_ENV = "blue"
         GREEN_ENV = "green"
-        DOCKER_REPO = "myrepo"                                 // DockerHub repo
+        DOCKER_REPO = "myrepo"                                 // DockerHub repo name
         GIT_REPO = "https://github.com/kasimDevOps/blue-green-deployment.git"
         BRANCH = "main"                                        // Git branch
     }
@@ -16,6 +16,7 @@ pipeline {
 
         stage('Checkout') {
             steps {
+                echo "Checking out code from GitHub..."
                 git branch: "${BRANCH}", credentialsId: 'github-creds', url: "${GIT_REPO}"
             }
         }
@@ -25,9 +26,10 @@ pipeline {
                 timeout(time: 10, unit: 'MINUTES') {
                     sh """
                         echo "Building frontend image..."
-                        docker build --progress=plain -t ${DOCKER_REPO}/frontend:latest ./frontend
+                        docker build -t ${DOCKER_REPO}/frontend:latest ./frontend
+
                         echo "Building backend image..."
-                        docker build --progress=plain -t ${DOCKER_REPO}/backend:latest ./backend
+                        docker build -t ${DOCKER_REPO}/backend:latest ./backend
                     """
                 }
             }
@@ -37,7 +39,10 @@ pipeline {
             steps {
                 timeout(time: 5, unit: 'MINUTES') {
                     sh """
+                        echo "Logging into DockerHub..."
                         echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin
+                        
+                        echo "Pushing Docker images..."
                         docker push ${DOCKER_REPO}/frontend:latest
                         docker push ${DOCKER_REPO}/backend:latest
                     """
@@ -49,18 +54,19 @@ pipeline {
             steps {
                 timeout(time: 5, unit: 'MINUTES') {
                     sh """
-                        echo "Deploying Green environment..."
-                        kubectl apply -f k8s/deployment-green.yaml --v=6
-                        kubectl apply -f k8s/service-green.yaml --v=6
+                        echo "Deploying to Green environment..."
+                        kubectl apply -f k8s/deployment-green.yaml
+                        kubectl apply -f k8s/service-green.yaml
                     """
                 }
             }
         }
 
-        stage('Test Green') {
+        stage('Test Green Environment') {
             steps {
                 timeout(time: 2, unit: 'MINUTES') {
-                    retry(3) { // retry 3 times if curl fails
+                    retry(3) {
+                        echo "Testing Green environment health endpoint..."
                         sh 'curl -f http://green.${APP_NAME}.example.com/health || exit 1'
                     }
                 }
@@ -70,15 +76,17 @@ pipeline {
         stage('Switch Traffic to Green') {
             steps {
                 timeout(time: 3, unit: 'MINUTES') {
-                    sh 'kubectl apply -f k8s/service-switch-green.yaml --v=6'
+                    echo "Switching traffic from Blue to Green..."
+                    sh 'kubectl apply -f k8s/service-switch-green.yaml'
                 }
             }
         }
 
-        stage('Cleanup Blue') {
+        stage('Cleanup Blue Environment') {
             steps {
                 timeout(time: 3, unit: 'MINUTES') {
-                    sh "kubectl scale deployment ${APP_NAME}-${BLUE_ENV} --replicas=0 --v=6"
+                    echo "Cleaning up Blue environment..."
+                    sh "kubectl scale deployment ${APP_NAME}-${BLUE_ENV} --replicas=0"
                 }
             }
         }
@@ -86,8 +94,14 @@ pipeline {
 
     post {
         failure {
-            echo "Deployment failed, rolling back to Blue..."
-            sh 'kubectl apply -f k8s/service-switch-blue.yaml --v=6 || echo "Rollback failed"'
+            echo "Deployment failed ❌ Rolling back to Blue environment..."
+            sh '''
+                echo "Rolling back traffic to Blue..."
+                kubectl apply -f k8s/service-switch-blue.yaml || echo "Rollback failed"
+            '''
+        }
+        success {
+            echo "✅ Blue-Green deployment completed successfully! Now serving traffic from Green."
         }
     }
 }
