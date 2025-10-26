@@ -2,45 +2,55 @@ pipeline {
     agent any
 
     environment {
-        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds')
+        DOCKERHUB_CREDENTIALS = credentials('dockerhub-creds') // DockerHub creds in Jenkins
+        GITHUB_CREDENTIALS = credentials('github-creds')       // GitHub token in Jenkins
         APP_NAME = "myapp"
         BLUE_ENV = "blue"
         GREEN_ENV = "green"
+        DOCKER_REPO = "myrepo"                                 // DockerHub repo
+        GIT_REPO = "https://github.com/kasimDevOps/blue-green-deployment.git"
+        BRANCH = "main"                                        // Set your branch
     }
 
     stages {
 
         stage('Checkout') {
             steps {
-                checkout scm
+                git branch: "${BRANCH}", credentialsId: 'github-creds', url: "${GIT_REPO}"
             }
         }
 
         stage('Build Docker Images') {
             steps {
-                sh 'docker build -t myrepo/frontend:latest ./frontend'
-                sh 'docker build -t myrepo/backend:latest ./backend'
+                sh """
+                    docker build -t ${DOCKER_REPO}/frontend:latest ./frontend
+                    docker build -t ${DOCKER_REPO}/backend:latest ./backend
+                """
             }
         }
 
         stage('Push Docker Images') {
             steps {
-                sh 'docker login -u $DOCKERHUB_CREDENTIALS_USR -p $DOCKERHUB_CREDENTIALS_PSW'
-                sh 'docker push myrepo/frontend:latest'
-                sh 'docker push myrepo/backend:latest'
+                sh """
+                    echo $DOCKERHUB_CREDENTIALS_PSW | docker login -u $DOCKERHUB_CREDENTIALS_USR --password-stdin
+                    docker push ${DOCKER_REPO}/frontend:latest
+                    docker push ${DOCKER_REPO}/backend:latest
+                """
             }
         }
 
         stage('Deploy to Green') {
             steps {
-                sh 'kubectl apply -f k8s/deployment-green.yaml'
-                sh 'kubectl apply -f k8s/service-green.yaml'
+                sh """
+                    kubectl apply -f k8s/deployment-green.yaml
+                    kubectl apply -f k8s/service-green.yaml
+                """
             }
         }
 
         stage('Test Green') {
             steps {
-                sh 'curl -f http://green.myapp.example.com/health || exit 1'
+                sh 'curl -f http://green.${APP_NAME}.example.com/health || exit 1'
             }
         }
 
@@ -52,7 +62,7 @@ pipeline {
 
         stage('Cleanup Blue') {
             steps {
-                sh 'kubectl scale deployment $APP_NAME-$BLUE_ENV --replicas=0'
+                sh "kubectl scale deployment ${APP_NAME}-${BLUE_ENV} --replicas=0"
             }
         }
     }
